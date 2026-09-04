@@ -302,7 +302,7 @@ Forwarding networks are inherently transient. In architectures where stages can 
 DOOM crashed during HUD status bar initialization with the error:
 `W_GetNumForName: STCFN.3d not found!`
 
-![STCFN Error Screen](images/stcfn_error.jpg)
+![STCFN Error Screen](images/stcfn_error.png)
 
 **Impact:**
 Game halted immediately prior to displaying the first title screen or gameplay.

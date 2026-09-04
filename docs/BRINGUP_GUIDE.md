@@ -93,7 +93,7 @@ What `program_and_load.tcl` performs under the hood:
 
 Upon reset, the processor begins execution from on-chip BRAM at `0x0000_0000`. The VGA display initializes and runs diagnostic self-tests:
 
-![Bootloader Diagnostic Screen](images/bootloader_screen.jpg)
+![Bootloader Diagnostic Screen](images/bootloader_screen.png)
 
 - **Test 1:** RV64M Multiplier and Multi-cycle Divider hardware checks.
 - **Test 2:** 64-bit Hardware Microsecond Timer increment test.
