@@ -110,6 +110,10 @@ The bootloader jumps to DDR address `0x8010_0000`, initializes the DOOM engine, 
 
 ![DOOM Title Screen on ZedBoard](images/doom_running.jpg)
 
+Selecting **New Game** begins E1M1 gameplay with authentic hardware palette color grading, active weapon firing, and on-screen FPS counter:
+
+![DOOM Gameplay on ZedBoard with Authentic Colors](images/doom_gameplay.jpg)
+
 ---
 
 ## 4. Hardware Controls Mapping

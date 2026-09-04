@@ -11,9 +11,9 @@
 
 ## The System Running DOOM on ZedBoard
 
-![DOOM Running Bare-Metal on ZedBoard](docs/images/doom_running.jpg)
+![DOOM Gameplay on ZedBoard with Authentic Palette](docs/images/doom_gameplay.jpg)
 
-*Bare-metal DOOM title menu rendering in real-time on a 640x480 VGA monitor via the custom RV64IM SoC and dual-port framebuffer on the workbench.*
+*Bare-metal DOOM E1M1 gameplay running in real-time on a 640x480 VGA monitor via the custom RV64IM SoC and dual-port framebuffer on the workbench, featuring authentic 256-color PLAYPAL hardware palette color grading, active weapon firing, and live on-screen FPS readout (3.3 FPS).*
 
 ---
 

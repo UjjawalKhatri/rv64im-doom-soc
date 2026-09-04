@@ -17,6 +17,10 @@ Performance measurements were captured via the hardware 64-bit microsecond timer
 | **Active Clock Frequency** | **100.00 MHz** | 10.0 ns cycle period |
 | **Total Clock Cycles per Frame** | **38,597,100 cycles** | — |
 
+![DOOM Gameplay with Live On-Screen FPS Counter](images/doom_gameplay.jpg)
+
+*Real-time on-screen telemetry showing 3.3 FPS during E1M1 corridor combat with authentic 256-color hardware palette color grading.*
+
 ---
 
 ## 2. Derivation of Blit Latency (48.75 Cycles per Store)
