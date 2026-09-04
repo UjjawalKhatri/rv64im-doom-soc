@@ -9,3 +9,5 @@ RTL: RV64IM pipeline, hazard/forwarding logic, SoC interconnect, DDR arbiter, na
 Software: bare-metal C runtime and freestanding libc, drivers, DOOM engine port and RV64 platform layer, in-memory WAD driver, hardware palette upload, JTAG tooling and frame-rate instrumentation, project documentation.
 
 Both authors jointly debugged the two microarchitectural bugs documented in [docs/ENGINEERING_LOG.md](docs/ENGINEERING_LOG.md).
+
+<!-- Verified by Molik Rajvanshi -->
