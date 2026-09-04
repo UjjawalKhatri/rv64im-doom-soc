@@ -13,7 +13,7 @@
 
 ![DOOM Gameplay on ZedBoard with Authentic Palette](docs/images/doom_gameplay.jpg)
 
-*Bare-metal DOOM E1M1 gameplay running in real-time on a 640x480 VGA monitor via the custom RV64IM SoC and dual-port framebuffer on the workbench, featuring authentic 256-color PLAYPAL hardware palette color grading, active weapon firing, and live on-screen FPS readout (3.3 FPS).*
+*Bare-metal DOOM running on the custom RV64IM SoC, output to a 640x480 VGA monitor with the authentic 256-colour PLAYPAL hardware palette and a live on-screen frame-rate counter. Sustained in-game frame rate is 2.59 FPS (measured, see Performance); lighter scenes such as the menu run slightly faster.*
 
 ---
 
@@ -27,10 +27,10 @@ The system synthesizes for the Xilinx Zynq-7000 XC7Z020 FPGA on the Digilent Zed
 
 ## Hardware Highlights
 
-- **Custom RV64IM CPU Core:** In-order 5-stage classic pipeline (`IF`, `ID`, `EX`, `MEM`, `WB`) with full data forwarding, load-use interlocks, 3-cycle pipelined multiplier, and multi-cycle radix-2 divider.
-- **Custom Memory Fabric:** Low-overhead SoC crossbar with round-robin I-side and D-side arbitration, prioritizing data transactions to prevent execution stalls.
+- **Custom RV64IM CPU Core:** In-order 5-stage classic pipeline (`IF`, `ID`, `EX`, `MEM`, `WB`) with full data forwarding, load-use interlocks, a multi-cycle multiplier and a multi-cycle radix-2 restoring divider, both interlocked with the pipeline via an execute-stage stall.
+- **Custom Memory Fabric:** Low-overhead SoC interconnect with a fixed-priority DDR arbiter that serves data-side requests ahead of instruction fetch, so a pending load or store is never blocked behind a speculative fetch.
 - **Native AXI3 Master:** High-performance single-outstanding 64-bit AXI3 transaction engine interfacing directly with the Zynq `S_AXI_HP0` port.
-- **Dual-Port Framebuffer:** 64 KB on-chip Block RAM holding a 320x200 8bpp frame, accessible simultaneously by the CPU at 100 MHz and the VGA rasterizer at 25 MHz with zero bus contention.
+- **Dual-Port Framebuffer:** 64 KB on-chip Block RAM holding a 320x200 8bpp frame. The CPU port and the VGA scan-out port are independent, so display refresh never contends with CPU writes. Both run in the 100 MHz domain; the VGA rasteriser advances on a 25 MHz pixel-enable strobe.
 - **Hardware Palette RAM:** 256-entry x 24-bit RGB runtime-writable lookup table at `0x20010000`, enabling authentic in-game damage flashes, item pickup effects, radiation suit tints, and gamma ramps.
 - **Bare-Metal Software Stack:** Standalone C runtime (`crt0.S`), freestanding `libc` implementation with formatted printing (`vsnprintf`), in-memory WAD filesystem, and hardware timer drivers.
 
@@ -94,7 +94,7 @@ Performance was captured live over JTAG via the 64-bit microsecond hardware time
 | **Operating Frequency** | **100.00 MHz** | 10.0 ns cycle period |
 
 ### Performance Analysis
-The SoC is currently **fetch-bound**. Because the processor lacks an L1 instruction cache, virtually every instruction executed outside the small fetch line buffer incurs a DDR3 round-trip across the AXI bus (~15–20 cycles). The blit routine transfers 64,000 bytes per frame and incurs 48.75 cycles per store instruction, limited by instruction fetch latency rather than BRAM write bandwidth.
+Because the processor has no L1 instruction cache, nearly every instruction outside the small fetch line buffer incurs a DDR3 round trip across the AXI bus. The framebuffer blit writes 64,000 bytes per frame and measures **48.75 cycles per byte store** (31,200 µs × 100 MHz / 64,000 stores) — far above the 1–2 cycles a Block RAM write costs, which shows the blit is bounded by instruction fetch rather than by framebuffer write bandwidth.
 
 Implementing a 4–8 KB direct-mapped L1 instruction cache is estimated to increase performance by **5x–10x**, reaching **13–26 FPS**. See [docs/PERFORMANCE.md](docs/PERFORMANCE.md) for the complete derivation and optimization roadmap.
 
@@ -148,7 +148,6 @@ rv64im-doom-soc/
 │
 └── tools/                         # Utilities
     ├── extract_playpal.py         # Extracts 256-color palette from WAD PLAYPAL lump
-    ├── generate_diagrams.py       # Renders publication architecture diagrams
     └── get_wad.ps1                # Automated fetch helper for DOOM1.WAD
 ```
 
@@ -173,13 +172,12 @@ powershell -ExecutionPolicy Bypass -File sw/build/build.ps1
 powershell -ExecutionPolicy Bypass -File sw/build/build_doom.ps1
 ```
 
-### 3. Generate Bitstream or Download Release
+### 3. Generate Bitstream
 Synthesize the complete project headlessly via Vivado:
 
 ```powershell
 vivado -mode batch -source scripts/vivado/create_project.tcl
 ```
-*Or download pre-built bitstream `doom_soc_top.bit` from GitHub Releases.*
 
 ### 4. Program FPGA and Load DRAM via JTAG
 Connect your ZedBoard via micro-USB and run:
@@ -189,7 +187,7 @@ xsdb scripts/jtag/program_and_load.tcl
 ```
 
 ### 5. Launch Gameplay
-Upon reset, the bootloader runs diagnostic self-tests on the VGA screen. Press **`BTND`** or flip switch **`SW0`** to jump into DOOM!
+5. On reset the bootloader runs its self-tests on the VGA screen. Press `BTND` to jump to DOOM in DDR3. At the title menu, flip `SW2` UP to select **New Game**, then flip it down and up again to choose a skill level.
 
 For in-depth flashing instructions and troubleshooting, see [docs/BRINGUP_GUIDE.md](docs/BRINGUP_GUIDE.md).
 
@@ -197,19 +195,21 @@ For in-depth flashing instructions and troubleshooting, see [docs/BRINGUP_GUIDE.
 
 ## Hardware Controls
 
-| Input Control | Function in Menu | Function in Gameplay (E1M1) |
+| Input | In Menu | In Gameplay |
 |---|---|---|
-| **`BTNC`** (Center Button) | Select Menu Item / Enter | Fire Weapon / Attack |
-| **`BTNU`** (Top Button) | Navigate Up | Move Forward |
-| **`BTND`** (Bottom Button) | Navigate Down | Move Backward |
-| **`BTNL`** (Left Button) | Back / Cancel | Turn Left |
-| **`BTNR`** (Right Button) | Confirm Selection | Turn Right |
-| **`SW0`** (Slide Switch 0) | Quick Start / Auto-Launch | — |
-| **`SW1`** (Slide Switch 1) | — | Strafe Left |
-| **`SW2`** (Slide Switch 2) | — | Strafe Right |
-| **`SW3`** (Slide Switch 3) | — | Open Door / Activate Switch (`USE`) |
-| **`SW4`** (Slide Switch 4) | — | Run (Fast Speed) |
-| **`SW7`** (Slide Switch 7) | **Telemetry Toggle:** DOWN = Milestone Codes, UP = Real-Time `PC[9:2]` |
+| `BTNU` (top) | Navigate up | Move forward |
+| `BTND` (bottom) | Navigate down | Move backward |
+| `BTNL` (left) | — | Turn left |
+| `BTNR` (right) | — | Turn right |
+| `SW2` | **Select (ENTER)** — flip UP to activate | — |
+| `SW3` | **Back (ESCAPE)** | Open / close menu |
+| `SW0` | — | Fire |
+| `SW1` | — | Use / open doors |
+| `SW7` | Telemetry view: DOWN = milestone codes, UP = live `PC[9:2]` | |
+| `BTNC` | **SYSTEM RESET — do not press during play** | |
+
+> Slide switches are level-held. Flipping a switch UP sends the key press
+> (which is what DOOM's menu acts on); flipping it DOWN sends the release.
 
 ---
 
@@ -258,3 +258,5 @@ Developed and brought up on the ZedBoard by:
 
 - **Ujjawal Khatri** — [GitHub (@UjjawalKhatri)](https://github.com/UjjawalKhatri)
 - **Molik Rajvanshi** — [GitHub (@MolikRajvanshi)](https://github.com/MolikRajvanshi)
+
+See [AUTHORS.md](AUTHORS.md) for individual architectural contributions and division of responsibilities.

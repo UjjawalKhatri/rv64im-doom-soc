@@ -71,7 +71,7 @@ Verifies memory-mapped peripheral address decoding, VGA video raster generation,
 
 **Key Checks:**
 - **VGA Timing Controller:** Verifies negative-polarity horizontal sync (31.468 kHz) and vertical sync (59.94 Hz), confirming exact pulse widths (HSYNC = 96 clocks, VSYNC = 2 lines).
-- **Dual-Port Framebuffer Arbitration:** Validates simultaneous write access on Port A (100 MHz CPU clock) and read access on Port B (25 MHz pixel clock) with zero data corruption.
+- **Dual-Port Framebuffer Arbitration:** Validates simultaneous write access on Port A (100 MHz CPU clock) and read access on Port B (100 MHz domain with 25 MHz pixel enable) with zero data corruption.
 - **Palette RAM Decode:** Writes to `0x2001_0000 + (index * 8)` and validates that the RGB888 color table updates immediately.
 
 ---

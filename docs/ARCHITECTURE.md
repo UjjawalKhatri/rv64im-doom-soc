@@ -24,7 +24,7 @@ graph TD
 
     subgraph MemoryFabric ["Memory Interconnect & Arbiter"]
         IC["soc_interconnect<br/>Address Decoder"]
-        ARB["ddr_request_arbiter<br/>Round-Robin & Priority"]
+        ARB["ddr_request_arbiter<br/>Fixed-Priority (D-Side First)"]
         AXIM["native_axi_master<br/>AXI3 64-bit Master"]
     end
 
@@ -80,7 +80,7 @@ sequenceDiagram
     IF->>ID: IF/ID Pipeline Register (Latches PC, Instruction)
     Note over ID: Decodes opcode, reads 32x64-bit RegFile,<br/>generates immediate, detects load-use hazards.
     ID->>EX: ID/EX Pipeline Register (Latches Operands & Controls)
-    Note over EX: Executes ALU operations, branches, M-extension<br/>multiplies (3-cycle) and divides (multi-cycle).<br/>Absorbs forwarded operands when held.
+    Note over EX: Executes ALU operations, branches, M-extension<br/>multiplies and divides (both multi-cycle).<br/>Absorbs forwarded operands when held.
     EX->>MEM: EX/MEM Pipeline Register (Latches Result, Store Data)<br/>Forces redirect_commit when branch/jump taken.
     Note over MEM: Formats load/store addresses, manages subword sign/zero<br/>extension, interfaces to SoC interconnect bus.
     MEM->>WB: MEM/WB Pipeline Register (Latches MemData or ALU Result)
@@ -167,7 +167,7 @@ graph LR
     - Clock: 100 MHz system clock (`clk`).
     - Write access: Byte-wide writes from CPU software blitter.
   - **Port B (VGA Scanout Read Path):**
-    - Clock: 25 MHz pixel clock (`vga_clk`).
+    - Clock: 100 MHz domain with 25 MHz pixel-enable strobe (`pixel_tick`).
     - Read access: Continuous raster scan addressing. Zero contention or bus wait-states with CPU writes.
 
 ### 4.2 Hardware Palette RAM

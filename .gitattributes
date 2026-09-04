@@ -9,3 +9,8 @@
 *.png    binary
 *.jpg    binary
 *.mp4    binary
+
+# Vendored upstream DOOM engine - exclude from GitHub language statistics
+sw/doom/doomgeneric/**            linguist-vendored
+# Generated / imported memory images
+**/*.mem                          linguist-generated

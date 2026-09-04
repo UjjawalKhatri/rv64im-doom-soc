@@ -40,7 +40,7 @@ $$\text{Cycle Cost per Byte Store} = \frac{3,120,000\text{ cycles}}{64,000\text{
 The destination BRAM has a single-cycle write latency (`ready = 1` immediately). The reason the loop takes 48.75 cycles per store is that **the processor is fetch-bound**:
 1. The blit loop instructions reside in DDR3 memory (`0x80100000+`).
 2. Without an L1 instruction cache, the processor must fetch the loop body instructions (`LD`, `SRLI`, `SB`, `ADDI`, `BNE`) across the AXI3 bus from external DDR3 for every iteration.
-3. Each sequential DDR3 AXI access experiences ~15–20 cycles of memory controller latency.
+3. Each sequential DDR3 AXI access experiences an estimated ~15–20 cycles of memory controller latency.
 4. Consequently, the CPU spends 95% of the blit loop stalled on instruction fetch, proving that the blit is limited by front-end memory bandwidth rather than write bandwidth.
 
 ---
@@ -54,7 +54,7 @@ The DOOM engine spends **91.92%** of its frame time inside the software rasteriz
 - **Arbiter Contention:**
   When DOOM accesses textures and geometry data from DDR, the `ddr_request_arbiter` prioritizes data memory access. This starves the instruction fetch unit, causing front-end stalls to ripple backward through the entire pipeline.
 - **ALU Throughput is Not the Bottleneck:**
-  The hardware multiplier executes 64-bit multiplications in 3 cycles, and the ALU executes all standard arithmetic in 1 cycle. The core computes fast enough; it simply spends the vast majority of its execution cycles waiting for instructions to arrive from DDR3.
+  The hardware multiplier and divider execute multi-cycle operations, and the ALU executes all standard arithmetic in 1 cycle. The core computes fast enough; it simply spends the vast majority of its execution cycles waiting for instructions to arrive from DDR3.
 
 ---
 

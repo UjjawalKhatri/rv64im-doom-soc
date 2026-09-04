@@ -56,9 +56,9 @@ powershell -ExecutionPolicy Bypass -File sw/build/build.ps1
 powershell -ExecutionPolicy Bypass -File sw/build/build_doom.ps1
 ```
 
-### Step 4: Generate or Download the FPGA Bitstream
+### Step 4: Generate the FPGA Bitstream
 
-You can download the pre-built `doom_soc_top.bit` from the GitHub Releases tab, or synthesize from source:
+Synthesize from source:
 
 ```powershell
 # Headless batch generation: Project -> Block Design -> Synthesis -> Implementation -> Bitstream
@@ -103,14 +103,13 @@ Upon reset, the processor begins execution from on-chip BRAM at `0x0000_0000`. T
 ### 3.2 Launching DOOM
 
 To transition from the bootloader to DOOM:
-- Press pushbutton **`BTND`** (Bottom Button) on the ZedBoard, **or**
-- Flip slide switch **`SW0`** to the UP position.
+- Press pushbutton **`BTND`** (Bottom Button) on the ZedBoard.
 
 The bootloader jumps to DDR address `0x8010_0000`, initializes the DOOM engine, loads textures from the in-memory WAD, uploads the hardware palette to `0x2001_0000`, and displays the title menu:
 
 ![DOOM Title Screen on ZedBoard](images/doom_running.jpg)
 
-Selecting **New Game** begins E1M1 gameplay with authentic hardware palette color grading, active weapon firing, and on-screen FPS counter:
+At the title menu, flip **`SW2`** UP to select **New Game**, then flip it down and up again to choose a skill level. Gameplay begins on E1M1 with authentic hardware palette color grading, active weapon firing, and live on-screen FPS counter:
 
 ![DOOM Gameplay on ZedBoard with Authentic Colors](images/doom_gameplay.jpg)
 
@@ -118,19 +117,21 @@ Selecting **New Game** begins E1M1 gameplay with authentic hardware palette colo
 
 ## 4. Hardware Controls Mapping
 
-| Control Input | Function in Menu | Function in Gameplay (E1M1) |
+| Input | In Menu | In Gameplay |
 |---|---|---|
-| **`BTNC`** (Center Button) | Enter / Select Menu Option | Fire Weapon / Attack |
-| **`BTNU`** (Top Button) | Move Selection Up | Move Forward |
-| **`BTND`** (Bottom Button) | Move Selection Down | Move Backward |
-| **`BTNL`** (Left Button) | Back / Cancel | Turn Left |
-| **`BTNR`** (Right Button) | Confirm Selection | Turn Right |
-| **`SW0`** (Slide Switch 0) | Quick Start / Auto-Launch | — |
-| **`SW1`** (Slide Switch 1) | — | Strafe Left |
-| **`SW2`** (Slide Switch 2) | — | Strafe Right |
-| **`SW3`** (Slide Switch 3) | — | Open Door / Activate Switch (`USE`) |
-| **`SW4`** (Slide Switch 4) | — | Run (Hold for high speed) |
-| **`SW7`** (Slide Switch 7) | **Diagnostic Telemetry Toggle:** DOWN = Milestone Codes, UP = Live `PC[9:2]` |
+| `BTNU` (top) | Navigate up | Move forward |
+| `BTND` (bottom) | Navigate down | Move backward |
+| `BTNL` (left) | — | Turn left |
+| `BTNR` (right) | — | Turn right |
+| `SW2` | **Select (ENTER)** — flip UP to activate | — |
+| `SW3` | **Back (ESCAPE)** | Open / close menu |
+| `SW0` | — | Fire |
+| `SW1` | — | Use / open doors |
+| `SW7` | Telemetry view: DOWN = milestone codes, UP = live `PC[9:2]` | |
+| `BTNC` | **SYSTEM RESET — do not press during play** | |
+
+> Slide switches are level-held. Flipping a switch UP sends the key press
+> (which is what DOOM's menu acts on); flipping it DOWN sends the release.
 
 ---
 
