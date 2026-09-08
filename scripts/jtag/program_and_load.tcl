@@ -26,7 +26,13 @@ proc find_file {candidates desc} {
 set ps7_init_file [find_file [list "scripts/jtag/ps7_init.tcl" "ps7_init.tcl" "../jtag/ps7_init.tcl"] "ps7_init.tcl"]
 set bit_file      [find_file [list "build/doom_soc_top.bit" "doom_soc_top.bit" "../../build/doom_soc_top.bit"] "bitstream"]
 set bin_file      [find_file [list "sw/build/doom_rv64.bin" "doom_rv64.bin" "../../sw/build/doom_rv64.bin"] "DOOM binary"]
-set wad_file      [find_file [list "doom1.wad" "sw/doom/doomgeneric/doom1.wad" "../../doom1.wad"] "DOOM1.WAD"]
+# sw/doom/doom1.wad is where tools/get_wad.ps1 puts it; the rest are fallbacks
+# for a manually placed copy.
+set wad_file      [find_file [list "sw/doom/doom1.wad" \
+                                   "doom1.wad" \
+                                   "sw/doom/doomgeneric/doom1.wad" \
+                                   "../../sw/doom/doom1.wad" \
+                                   "../../doom1.wad"] "DOOM1.WAD"]
 
 # Step 1: System Reset into clean state
 puts "=================================================================="

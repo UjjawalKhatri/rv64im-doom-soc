@@ -30,7 +30,7 @@ graph TD
 
     subgraph PS7 ["Xilinx Zynq PS7 & DDR3"]
         HP0["S_AXI_HP0 Port<br/>64-bit @ 100 MHz"]
-        DDR["512 MB DDR3 DRAM<br/>Physical Address: 0x1000_0000"]
+        DDR["512 MB DDR3 DRAM<br/>Physical base: 0x0000_0000"]
     end
 
     subgraph Peripherals ["On-Chip Peripherals & Display"]
@@ -92,17 +92,27 @@ sequenceDiagram
 1. **Forwarding Paths:**
    - `EX/MEM` $\to$ `EX`: Resolves 1-cycle data hazards (ALU-to-ALU dependencies).
    - `MEM/WB` $\to$ `EX`: Resolves 2-cycle data hazards (ALU/Load-to-ALU dependencies).
-   - Memory store forwarding (`ld_after_sd_forwarding`): Forwards pending store data directly to subsequent overlapping loads.
+   - `WB` $\to$ `MEM` store data (`ld_after_sd_forwarding`): when a store sitting in `MEM` sources its data from a register being written back this cycle (`wb_rd == mem_rs2`), the write-back value is substituted for the stale `mem_store_data`. This is what makes `ld`/`jal` immediately followed by a dependent `sd` commit the right value.
 
 2. **Load-Use Interlock:**
-   When an instruction in `ID` depends on a load instruction currently in `EX` (`ex_mem_read == 1` and (`ex_rd == id_rs1` or `ex_rd == id_rs2`)):
-   - The Hazard Unit asserts `bubble_sel = 1` and de-asserts `pc_write` and `if_id_write`.
-   - Injects a NOP bubble into `ID/EX` for exactly one clock cycle while retaining the dependent instruction in `ID`.
+   When an instruction in `ID` depends on a load currently in `EX` (`ex_mem_read == 1`, `ex_rd != x0`):
+   - On `ex_rd == id_rs1`, the Hazard Unit always stalls.
+   - On `ex_rd == id_rs2`, it stalls **unless** the consumer is itself a load or store. A dependent store does not need the value in `EX` — only as store data in `MEM` — where the `WB` $\to$ `MEM` path above supplies it, so the bubble is skipped.
+   - When it stalls, it asserts `bubble_sel = 1` and de-asserts `pc_write` and `if_id_write`, injecting a NOP into `ID/EX` for one cycle while holding the dependent instruction in `ID`.
 
 3. **Operand Absorption on Hold (Issue #8 Resolution):**
    When `fetch_stall` or `memory_stall` freezes the `ID/EX` pipeline register, active forwarding conditions from instructions in `MEM` or `WB` can expire as those producing instructions retire.
-   - **Contract:** If `id_ex_enable == 0` and `stall_flush == 0`, any non-zero forwarding select (`fwd_a != 00` or `fwd_b != 00`) forces `ID/EX` to immediately capture the forwarded operand into `ex_data1` / `ex_data2`.
-   - When forwarding drops to `00` in subsequent stall cycles, the execution stage reads the persistent absorbed value, eliminating transient operand decay.
+   - **Contract:** while `ID_EX` is held (`hold == 1`, `flush == 0`), it writes the *post-forwarding* operands back into itself every cycle:
+
+     ```verilog
+     end else begin          // held in EX
+         ex_data1 <= fwd_data1;   // = alu_a_raw, the forwarding mux output
+         ex_data2 <= fwd_data2;   // = alu_b_pre
+     end
+     ```
+
+   - When no forwarding is active the mux already selects `ex_dataN`, so this is a harmless self-assign. When forwarding *is* active it makes the value permanent.
+   - Once forwarding drops to `00` in a later stall cycle, `EX` reads the absorbed value instead of a stale register-file read, eliminating operand decay.
 
 4. **Committing Redirect under Fetch Stall (Issue #7 Resolution):**
    When a control-flow transfer occurs (`JAL`, `JALR`, or taken branch):
@@ -120,7 +130,7 @@ The system uses the 512 MB on-board DDR3 DRAM connected to the Zynq Processing S
 
 ```mermaid
 graph LR
-    IFU["Instruction Fetch Unit<br/>(32B Line Buffer)"] -- "i_req [63:0]" --> ARB["ddr_request_arbiter<br/>(Priority to LSU)"]
+    IFU["Instruction Fetch Unit<br/>(64-bit Line Buffer)"] -- "i_req [63:0]" --> ARB["ddr_request_arbiter<br/>(Priority to LSU)"]
     LSU["Load/Store Unit<br/>(Byte Strobes)"] -- "d_req [63:0]" --> ARB
     ARB -- "ddr_req [63:0]" --> AXI["native_axi_master<br/>(Single-Outstanding)"]
     AXI -- "AXI3 64-bit HP0" --> PS7["Zynq PS7 HP0 & DDR Controller"]
@@ -132,7 +142,7 @@ graph LR
 ### 3.1 Structural Components
 
 - **Instruction Fetch Unit (`rtl/core/instruction_fetch_unit.v`):**
-  Integrates a 32-byte line buffer. When the program counter accesses sequential instructions within the cached line, fetch latency is 0 cycles. On a line miss, it requests a 64-bit word from the DDR arbiter.
+  Integrates a single 64-bit line buffer holding one 8-byte-aligned pair of instructions. A fetch whose `pc[31:3]` matches the buffered line resolves in 0 cycles, so a straight-line pair of instructions costs one DDR round trip rather than two. Any other address is a miss: the unit asserts `fetch_stall`, requests the aligned 8-byte block from the DDR arbiter, and tags the request with an epoch bit so a response arriving after a branch redirect is discarded. This is a line buffer, not a cache — there is no tag array and no second entry, which is why the roadmap's L1 I-cache is the single largest available speedup.
 - **Load/Store Unit (`rtl/core/load_store_unit.v`):**
   Generates 64-bit memory requests with 8-bit byte-enable strobes (`d_req_wstrb[7:0]`) for byte (`SB`), halfword (`SH`), word (`SW`), and doubleword (`SD`) stores. Handles sign-extension for `LB`, `LH`, `LW`, `LD` and zero-extension for `LBU`, `LHU`, `LWU`.
 - **DDR Request Arbiter (`rtl/soc/ddr_request_arbiter.v`):**
@@ -142,7 +152,7 @@ graph LR
 - **Native AXI Master (`rtl/soc/native_axi_master.v`):**
   Translates native single-beat requests into AXI3 read/write transactions (`AW`, `W`, `B`, `AR`, `R`).
   - Implements a single-outstanding transaction state machine.
-  - **Address Remapping:** Translates CPU virtual addresses in DDR space (`0x8000_0000`–`0x8FFF_FFFF`) to physical DDR3 addresses (`0x1000_0000`–`0x1FFF_FFFF`), bypassing low memory reserved by the ARM boot environment.
+  - **Address Remapping:** Clears bit 31 of the CPU address, mapping the DDR window `0x8000_0000`–`0xFFFF_FFFF` onto physical PS DDR3 `0x0000_0000`–`0x7FFF_FFFF` (`phys_addr = {1'b0, req_addr[30:3], 3'b000}`). The low `[2:0]` bits are forced to zero because AXI3 `AxSIZE = 3'b011` requires 8-byte-aligned addresses; byte lanes are selected by `WSTRB` on writes and by the LSU on reads.
 
 ---
 
@@ -182,12 +192,12 @@ graph LR
 ### 4.3 Integer Scaling & Raster Timing (640x480 @ 60 Hz)
 
 ```
-Horizontal Timing (25.175 MHz pixel clock, 31.468 kHz line rate):
+Horizontal Timing (25.000 MHz pixel clock, 31.25 kHz line rate):
 ├────── Active Video (640 px) ──────┤─ FP (16) ─├─ Sync (96) ─├─ BP (48) ─┤
 │ 320 framebuffer pixels, 2x clocks │           │ (Negative)  │            │
 └───────────────────────────────────┴───────────┴─────────────┴────────────┘
 
-Vertical Timing (525 total lines, 59.94 Hz refresh rate):
+Vertical Timing (525 total lines, 59.52 Hz refresh rate):
 ├─ Top Border (40) ─┼───── Active DOOM Area (400) ─────┼─ Bot Border (40) ─┼─ FP (10) ─┼─ Sync (2) ─┼─ BP (33) ─┤
 │ Solid Black       │ 200 rows displayed 2 lines each  │ Solid Black       │           │ (Negative) │           │
 └───────────────────┴──────────────────────────────────┴───────────────────┴───────────┴────────────┴───────────┘

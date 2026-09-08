@@ -37,9 +37,15 @@ To isolate pure clock frequency scaling from scene variance, all three hardware 
 
 | Operating Target | Fabric Clock | Timing Status (WNS) | 1,024-Frame Average FPS | Average Frame Duration | Blit Duration (Fixed Workload) | Render & Logic Duration |
 |---|---|---|---|---|---|---|
-| **`doom_soc_top.bit`** | **100.00 MHz** | −4.015 ns | **3.19 FPS** | **312,502 µs** | **31,169 µs** (9.97%) | 281,333 µs (90.03%) |
-| **`doom_soc_top_75mhz.bit`** | **75.00 MHz** | **−0.661 ns** | **2.64 FPS** | **378,293 µs** | **36,906 µs** (9.75%) | 341,387 µs (90.25%) |
-| **`doom_soc_top_50mhz.bit`** | **50.00 MHz** | **+0.972 ns (Closed)** | **2.11 FPS** | **473,680 µs** | **47,955 µs** (10.12%) | 425,725 µs (89.88%) |
+| `doom_soc_top.bit` | 100.00 MHz | −4.015 ns (not met) | **3.19 FPS** | 312,502 µs | 31,169 µs (9.97%) | 281,333 µs (90.03%) |
+| `doom_soc_top_75mhz.bit` | 75.00 MHz | −1.209 ns (not met) | **2.64 FPS** | 378,293 µs | 36,906 µs (9.75%) | 341,387 µs (90.25%) |
+| **`doom_soc_top_50mhz.bit`** | **50.00 MHz** | **+0.972 ns (met)** | **2.11 FPS** | 473,680 µs | 47,955 µs (10.12%) | 425,725 µs (89.88%) |
+
+> WNS figures are taken from `report_timing_summary` on the implemented run that
+> produced each bitstream. Only the 50 MHz build meets timing (0 failing
+> endpoints of 10,492; WHS +0.047 ns). The 100 MHz and 75 MHz builds have 2,990
+> and 2,083 failing endpoints respectively — they run on the boards tested here
+> but are over-clocked, not signed off.
 
 **Physical Memory Latency Model ($B(f) = C/f + M$):**
 Fitting the fixed 64,000-byte framebuffer blit durations between 100 MHz (31,169 µs) and 50 MHz (47,955 µs) isolates the fixed memory controller penalty:
@@ -101,7 +107,7 @@ The core already instantiates `perf_counters.v` internally, tracking:
 
 ---
 
-### Tier 1: Implement an L1 Instruction Cache (Estimated 5x–10x Speedup $\to$ 13–26 FPS)
+### Tier 1: Implement an L1 Instruction Cache (Estimated 5x–10x Speedup $\to$ 16–32 FPS)
 **The single most impactful architectural enhancement.**
 - **Specification:**
   - Direct-mapped or 2-way set associative.
@@ -109,7 +115,7 @@ The core already instantiates `perf_counters.v` internally, tracking:
   - Line size: 32 bytes (4 words of 64 bits), utilizing AXI burst reads (`INCR4`).
 - **Impact:**
   DOOM's inner rasterization loops (`R_DrawColumn` and `R_DrawSpan`) are tight routines of fewer than 50 instructions. Once resident in cache, inner loop fetches will execute with **0-cycle penalty**.
-- **Expected Frame Rate:** **13 to 26 FPS**, achieving near-arcade fluid gameplay.
+- **Expected Frame Rate:** **16 to 32 FPS** against the 3.19 FPS whole-run average at 100 MHz (13–26 FPS against the heavier 2.59 FPS in-game E1M1 window).
 
 ---
 

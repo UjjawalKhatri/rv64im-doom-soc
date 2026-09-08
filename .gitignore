@@ -39,6 +39,16 @@ xsim.*
 **/data.mem
 
 # ============================================================================
+# Vivado Build Output
+# scripts/vivado/create_project.tcl writes the whole project tree, the routed
+# checkpoint and the reports under build/. That is ~50 MB per configuration and
+# is fully reproducible from source, so none of it belongs in git.
+# ============================================================================
+build/
+*.dcp
+*.rpt
+
+# ============================================================================
 # Hardware Bitstreams (Publish via GitHub Releases, do not track in Git)
 # ============================================================================
 *.bit

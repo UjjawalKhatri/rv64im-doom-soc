@@ -81,8 +81,8 @@ What `program_and_load.tcl` performs under the hood:
 2. Initializes PS7 clocks and DDR3 memory controllers via `ps7_init`.
 3. Downloads the FPGA bitstream (`doom_soc_top.bit`).
 4. Connects to the CoreSight DAP (`targets 1`) to bypass ARM caches and writes directly to physical DDR3:
-   - `sw/build/doom_rv64.bin` $\to$ `0x1010_0000` (CPU `0x8010_0000`)
-   - `doom1.wad` $\to$ `0x1080_0000` (CPU `0x8100_0000`)
+   - `sw/build/doom_rv64.bin` $\to$ `0x0010_0000` (CPU `0x8010_0000`)
+   - `doom1.wad` $\to$ `0x0100_0000` (CPU `0x8100_0000`)
 5. Asserts and releases the RV64IM processor reset line.
 
 ---

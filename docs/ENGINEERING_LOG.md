@@ -464,7 +464,7 @@ The processor lacks an L1 instruction cache. Virtually every instruction execute
 
 **Roadmap for Optimization:**
 Documented in detail in `docs/PERFORMANCE.md`:
-1. Implement a 4–8 KB direct-mapped L1 instruction cache (estimated 5–10x performance increase to 13–26 FPS).
+1. Implement a 4–8 KB direct-mapped L1 instruction cache (estimated 5–10x performance increase to 16–32 FPS on the 1,024-frame average).
 2. Widen the framebuffer BRAM write port to 64-bit with byte strobes to cut blit operations by 8x.
 3. Expose hardware performance counters via MMIO to measure retired CPI directly.
 
