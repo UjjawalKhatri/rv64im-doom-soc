@@ -13,7 +13,7 @@
 
 ![DOOM Gameplay on ZedBoard with Authentic Palette](docs/images/doom_gameplay.jpg)
 
-*Bare-metal DOOM running on the custom RV64IM SoC, output to a 640x480 VGA monitor with the authentic 256-colour PLAYPAL hardware palette and a live on-screen frame-rate counter. Sustained in-game frame rate is 2.59 FPS (measured, see Performance); lighter scenes such as the menu run slightly faster.*
+*Bare-metal DOOM running on the custom RV64IM SoC, output to a 640x480 VGA monitor with the authentic 256-colour PLAYPAL hardware palette and a live on-screen frame-rate counter. In-game E1M1 combat measures 2.59 FPS over a 32-frame window; the standardised 1,024-frame benchmark averages 3.19 FPS at 100 MHz. See Measured Performance for why both figures are reported.*
 
 ---
 
@@ -85,16 +85,36 @@ For complete microarchitecture specifications, pipeline stage contracts, and bus
 
 Performance was captured live over JTAG via the 64-bit microsecond hardware timer (`0x10001018`) and telemetry registers (`0x80530000`) using `scripts/jtag/read_fps.tcl`:
 
+> **Two different figures appear below, and both are correct.** The table in
+> this section is a *windowed* reading: the frame rate over the last 32 frames
+> during E1M1 corridor combat, which is the heaviest scene in the game. The
+> multi-frequency table that follows is a *whole-run average* over 1,024 frames
+> of the attract/demo loop, which includes lighter menu and title screens. The
+> windowed figure shows what the hardware does under load; the 1,024-frame
+> average is the only one suitable for comparing builds, because a 32-frame
+> window swings by more than 2x with scene content alone — far more than the
+> difference between two clock frequencies.
+
 | Metric | Measured Value | Percentage of Frame |
 |---|---|---|
-| **Sustained Frame Rate** | **2.59 FPS** | — |
+| **Windowed Frame Rate (32 frames, in-game E1M1)** | **2.59 FPS** | — |
 | **Total Frame Duration** | **385,971 µs** (385.97 ms) | 100.00% |
 | **3D Rendering & Game Logic** | **354,771 µs** (354.77 ms) | **91.92%** |
 | **Framebuffer Blit (`I_FinishUpdate`)** | **31,200 µs** (31.20 ms) | **8.08%** |
 | **Operating Frequency** | **100.00 MHz** | 10.0 ns cycle period |
 
+### Multi-Frequency Benchmark Comparison (1,024-Frame Standardized Attract Loop)
+
+To isolate pure clock frequency scaling from scene variance, all three hardware builds were benchmarked over **1,024 consecutive frames** using the automated, zero-input attract/demo loop protocol (`scripts/jtag/measure_fps.tcl`):
+
+| Operating Target | Fabric Clock | Timing Status (WNS) | 1,024-Frame Benchmark | Average Frame Duration | Blit Latency (Fixed Workload) |
+|---|---|---|---|---|---|
+| **`doom_soc_top.bit`** | **100.00 MHz** | −4.015 ns | **3.19 FPS** | **312,502 µs** | **31,169 µs** (9.97%) |
+| **`doom_soc_top_75mhz.bit`** | **75.00 MHz** | **−0.661 ns** | **2.64 FPS** | **378,293 µs** | **36,906 µs** (9.75%) |
+| **`doom_soc_top_50mhz.bit`** | **50.00 MHz** | **+0.972 ns (Closed)** | **2.11 FPS** | **473,680 µs** | **47,955 µs** (10.12%) |
+
 ### Performance Analysis
-Because the processor has no L1 instruction cache, nearly every instruction outside the small fetch line buffer incurs a DDR3 round trip across the AXI bus. The framebuffer blit writes 64,000 bytes per frame and measures **48.75 cycles per byte store** (31,200 µs × 100 MHz / 64,000 stores) — far above the 1–2 cycles a Block RAM write costs, which shows the blit is bounded by instruction fetch rather than by framebuffer write bandwidth.
+Because the processor has no L1 instruction cache, nearly every instruction outside the small fetch line buffer incurs a DDR3 round trip across the AXI bus. The framebuffer blit writes 64,000 bytes per frame and measures **48.75 cycles per byte store** (31,200 µs × 100 MHz / 64,000 stores) — far above the 1–2 cycles a Block RAM write costs, which shows the blit is bounded by instruction fetch rather than by framebuffer write bandwidth. Fitting $B(f) = C/f + M$ to the blit durations demonstrates that **46.15% of memory operation time is fixed DDR3 controller round-trip latency**, predicting 75 MHz blit duration to within **0.38%** of silicon measurements.
 
 Implementing a 4–8 KB direct-mapped L1 instruction cache is estimated to increase performance by **5x–10x**, reaching **13–26 FPS**. See [docs/PERFORMANCE.md](docs/PERFORMANCE.md) for the complete derivation and optimization roadmap.
 
@@ -238,7 +258,7 @@ See [docs/VERIFICATION.md](docs/VERIFICATION.md) for full testbench documentatio
 
 ## Known Limitations & Roadmap
 
-- **No Instruction Cache:** Primary bottleneck limiting performance to 2.59 FPS. Roadmap priority #1.
+- **No Instruction Cache:** The primary bottleneck. Roughly 46% of memory-operation time is fixed DDR3 round-trip latency that no clock increase can recover, which is why halving the fabric clock costs only ~34% of the frame rate. Roadmap priority #1.
 - **No Hardware Audio:** Sound effects and MIDI music are currently stubbed in software. Future work: I2S audio driver for the ZedBoard ADAU1761 audio codec.
 - **Input via Switches/Buttons:** PS/2 keyboard adapter or USB-HID interface planned via second Pmod header.
 

@@ -57,7 +57,6 @@ module framebuffer_mmio (
 
     // Framebuffer pixel data from VGA port
     wire [7:0] vga_pixel_index;
-    wire [7:0] cpu_pixel_readback;
 
     // Extract the correct byte from mmio_wdata based on mmio_addr[2:0] (LSU alignment)
     wire [7:0]  cpu_fb_wdata = (mmio_wdata >> (8 * mmio_addr[2:0])) & 8'hFF;
@@ -68,27 +67,35 @@ module framebuffer_mmio (
         .we_a(cpu_fb_we),
         .addr_a(cpu_fb_addr),
         .din_a(cpu_fb_wdata),
-        .dout_a(cpu_pixel_readback),
+        .dout_a(),                 // CPU read port unused - see note below
 
         .clk_b(clk),
         .addr_b(vga_fb_addr),
         .dout_b(vga_pixel_index)
     );
 
-    // 1-cycle read latency handshake for synchronous BRAM
-    reg fb_read_pending;
-    always @(posedge clk) begin
-        if (reset)
-            fb_read_pending <= 1'b0;
-        else if (mmio_valid && !mmio_we && !fb_read_pending)
-            fb_read_pending <= 1'b1;
-        else
-            fb_read_pending <= 1'b0;
-    end
-
-    // MMIO response: immediate for writes, 1-cycle delayed for synchronous BRAM reads
-    assign mmio_ready = mmio_valid && (mmio_we || fb_read_pending);
-    assign mmio_rdata = {8{cpu_pixel_readback}};
+    // ------------------------------------------------------------------------
+    // The framebuffer is WRITE-ONLY from the CPU side.
+    //
+    // Nothing reads it: sw/src/vga.c and doomgeneric_rv64.c only ever store to
+    // FB_BASE, and the core does not stall on MMIO reads at all (memory_stall
+    // gates on is_ddr_data, and the framebuffer is not in the DDR range), so a
+    // load from here could never have returned correct data in the first place.
+    //
+    // It is not free, though. Wiring dout_a back into mmio_rdata put the BRAM
+    // output register directly into the core's load-return mux, and from there
+    // into the forwarding path and the ALU carry chain. That dead path was the
+    // WORST setup path in both the 100 MHz and the 75 MHz builds:
+    //
+    //   FB_inst/fb_ram_inst/fb_mem_reg_*/CLKARDCLK -> ... -> core_inst/EXMEM_*
+    //   15.238 ns @ 100 MHz   /   15.038 ns @ 75 MHz, 22 logic levels
+    //
+    // Returning a constant removes it entirely. Reads still complete in one
+    // cycle so the interconnect handshake is unchanged; they just read as 0
+    // instead of as garbage.
+    // ------------------------------------------------------------------------
+    assign mmio_ready = mmio_valid;
+    assign mmio_rdata = 64'b0;
 
     // ========================================================================
     // DOOM Default Palette ROM (256 entries × 24-bit RGB)

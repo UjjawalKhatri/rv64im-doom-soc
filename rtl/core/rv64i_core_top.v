@@ -50,9 +50,9 @@ module rv64i_core_top #(
     wire [63:0] pc_branch;
     wire [63:0] pc_next;
     wire [31:0] instr;
-    wire        pc_write_en;
-    wire        flush_sig;
-    wire        if_id_write_en;
+    (* MAX_FANOUT = 40 *) wire pc_write_en;
+    (* MAX_FANOUT = 40 *) wire flush_sig;
+    (* MAX_FANOUT = 40 *) wire if_id_write_en;
 
     // IF/ID Pipeline Register Wires
     wire        if_id_valid;
@@ -66,7 +66,7 @@ module rv64i_core_top #(
     wire [3:0]  alu_ctrl_raw;
 
     // Control Bubble Wires
-    wire        bubble_sel;
+    (* MAX_FANOUT = 40 *) wire bubble_sel;
     wire        b_branch, b_jump, b_jalr, b_mem_read, b_mem_write, b_reg_write, b_is_word_op, b_is_muldiv;
     wire [1:0]  b_wb_sel, b_op_a_sel;
     wire        b_alu_src;
@@ -93,18 +93,20 @@ module rv64i_core_top #(
     // EX Stage Execution, Forwarding, Branch & M-Extension Wires
     wire [1:0]  fwd_a, fwd_b;
     wire [63:0] ex_mem_fwd_val;
+    // alu_b[4] carries fanout 149 (0.935 ns) on the critical path. MAX_FANOUT
+    // here was measured and reverted - see the note in EX_MEM.v.
     wire [63:0] alu_a_raw, alu_b_pre, alu_a, alu_b;
     wire [63:0] alu_out;
     wire        alu_zero;
     wire        branch_cond_met;
-    wire        redirect_taken;
+    (* MAX_FANOUT = 40 *) wire redirect_taken;
 
     // RV64M Hardware Multiplier & Divider Wires
     wire        start_mul, start_div, mul_busy, mul_done, div_busy, div_done;
     wire [63:0] mul_result, div_result, muldiv_result;
     wire        execute_stall;
     wire        fetch_stall;   // From instruction fetch unit (DDR latency)
-    wire        memory_stall;  // From DDR data load/store latency
+    (* MAX_FANOUT = 40 *) wire memory_stall;  // From DDR data load/store latency
     reg         muldiv_started;
 
     // DDR transaction completion latch: prevents MEM stage from re-issuing
@@ -446,6 +448,16 @@ module rv64i_core_top #(
 
     assign muldiv_result = ex_funct3[2] ? div_result : mul_result;
 
+    // Address-class decode computed in EX from alu_out and pipelined into
+    // EX/MEM. This keeps the decode off the MEM-stage path that feeds the
+    // forwarding network, the branch comparator and the PC clock enable.
+    wire ex_is_mmio_addr = (alu_out[31:28] >= 4'h1);  // 0x1000_0000+ external/MMIO
+    wire ex_is_ddr_data  = (alu_out[31] == 1'b1);      // 0x8000_0000+ DDR
+
+    // Registered outputs of EX/MEM, consumed by the MEM stage below.
+    wire is_mmio_addr;
+    wire is_ddr_data;
+
     // EX/MEM Pipeline Register
     EX_MEM EXMEM_inst (
         .clk(clk),
@@ -463,6 +475,8 @@ module rv64i_core_top #(
         .ex_store_data(alu_b_pre),
         .ex_rs2(ex_rs2),
         .ex_rd(ex_rd),
+        .ex_is_mmio_addr(ex_is_mmio_addr),
+        .ex_is_ddr_data(ex_is_ddr_data),
         .mem_valid(mem_valid),
         .mem_wb_sel(mem_wb_sel),
         .mem_reg_write_en(mem_reg_write),
@@ -474,7 +488,9 @@ module rv64i_core_top #(
         .mem_pc_plus4(mem_pc_plus4),
         .mem_store_data(mem_store_data),
         .mem_rs2(mem_rs2),
-        .mem_rd(mem_rd)
+        .mem_rd(mem_rd),
+        .mem_is_mmio_addr(is_mmio_addr),
+        .mem_is_ddr_data(is_ddr_data)
     );
 
     // ------------------------------------------------------------------------
@@ -493,8 +509,7 @@ module rv64i_core_top #(
     assign mem_write_data_final = ld_sd_sel ? wb_write_data : mem_store_data;
 
     // External MMIO vs Local Data Memory Decode
-    wire is_mmio_addr = (mem_alu_out[31:28] >= 4'h1); // 0x1000_0000+ is external/MMIO
-    wire is_ddr_data  = (mem_alu_out[31] == 1'b1);     // 0x8000_0000+ is DDR
+    // is_mmio_addr / is_ddr_data are declared above and registered in EX/MEM.
 
     wire global_stall = execute_stall || fetch_stall || memory_stall;
 
@@ -527,7 +542,33 @@ module rv64i_core_top #(
     assign data_req_wstrb = mem_wstrb;
 
     // Memory stall is active while waiting for DDR response and not yet completed
-    assign memory_stall = mem_valid && (mem_mem_read || mem_mem_write) && is_ddr_data && !data_rsp_ready && !mem_ddr_completed;
+    // ------------------------------------------------------------------------
+    // On-chip data memory read latency
+    //
+    // Data_Memory is a Block RAM with a registered read port, so a load from the
+    // boot region (address < 0x1000_0000) needs one extra cycle before its data
+    // is valid. Hold the pipeline for exactly one cycle to absorb it.
+    //
+    // Stores need no stall (the write is already synchronous), and code running
+    // from DDR3 never targets this region, so this costs nothing at run time.
+    // ------------------------------------------------------------------------
+    wire local_read_req = mem_valid && mem_mem_read && !is_mmio_addr;
+    reg  local_read_done;
+
+    always @(posedge clk) begin
+        if (reset)
+            local_read_done <= 1'b0;
+        else if (local_read_req && !local_read_done)
+            local_read_done <= 1'b1;
+        else
+            local_read_done <= 1'b0;
+    end
+
+    wire local_read_stall = local_read_req && !local_read_done;
+
+    assign memory_stall = (mem_valid && (mem_mem_read || mem_mem_write) && is_ddr_data &&
+                           !data_rsp_ready && !mem_ddr_completed)
+                        || local_read_stall;
 
     wire [63:0] local_mem_rdata;
     assign raw_mem_rdata = is_mmio_addr ? (mem_ddr_completed ? mem_ddr_rdata_latch : data_rsp_rdata) : local_mem_rdata;

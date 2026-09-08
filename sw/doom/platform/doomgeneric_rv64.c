@@ -34,6 +34,12 @@ void DG_Init(void) {
 //   [0] = FPS x100            [1] = total frames rendered
 //   [2] = avg frame time (us) [3] = avg framebuffer blit time (us)
 //   [4] = 0x50455246 ('PERF') magic, proves the block is live
+//   [5] = elapsed us since the first frame   (whole run)
+//   [6] = blit us accumulated over that span (whole run)
+//
+// [0]-[3] describe only the last FPS_WINDOW frames and swing by >2x with the
+// scene, so they must NOT be used to compare two builds. Use [1] and [5] for
+// that: average FPS = frames / (elapsed_us / 1e6).
 //
 // Frame time is measured end-of-blit to end-of-blit, so it includes game
 // logic, the 3D renderer and the blit -- i.e. the real end-to-end frame rate.
@@ -48,6 +54,13 @@ static uint64_t fps_win_start  = 0;
 static uint64_t fps_blit_accum = 0;
 static uint64_t fps_total      = 0;
 static uint32_t fps_x100       = 0;
+/* Whole-run accumulators. The windowed figure above covers only the last
+   FPS_WINDOW frames, which makes it swing by more than 2x purely with what is
+   on screen (title screen vs a busy room) - far more than the difference
+   between two clock frequencies. These two make a scene-independent average
+   possible, so builds at different clocks can actually be compared. */
+static uint64_t fps_run_start  = 0;
+static uint64_t fps_run_blit   = 0;
 
 // Draw "FPS nn.n" into the top-left of the framebuffer (white on black).
 // Costs ~9 glyphs x 64 px = ~576 byte stores, <1% of the 64000-byte blit.
@@ -106,8 +119,11 @@ void DG_DrawFrame(void) {
     fps_total++;
     fps_count++;
 
+    if (fps_run_start != 0) fps_run_blit += (t_blit1 - t_blit0);
+
     if (fps_win_start == 0) {
         fps_win_start = t_blit1;            // first frame starts the window
+        fps_run_start = t_blit1;            // ...and the whole-run average
     } else if (fps_count >= FPS_WINDOW) {
         uint64_t win = t_blit1 - fps_win_start;
         if (win > 0) {
@@ -117,6 +133,11 @@ void DG_DrawFrame(void) {
             PERF_BLOCK[2] = win / FPS_WINDOW;
             PERF_BLOCK[3] = fps_blit_accum / FPS_WINDOW;
             PERF_BLOCK[4] = 0x50455246ULL;  // 'PERF'
+            // Whole-run figures: elapsed us since the first frame, and the
+            // blit time accumulated over that same span. Divide frames by
+            // elapsed for an average that does not depend on the scene.
+            PERF_BLOCK[5] = t_blit1 - fps_run_start;
+            PERF_BLOCK[6] = fps_run_blit;
         }
         fps_win_start  = t_blit1;
         fps_blit_accum = 0;

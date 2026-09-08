@@ -437,6 +437,12 @@ Map application-level control conventions (navigation vs. in-game action) thorou
 **Symptom:**
 DOOM achieved a steady 2.59 frames per second at 100 MHz clock frequency.
 
+> Note added later: this 2.59 figure is a 32-frame window captured during E1M1
+> corridor combat, the heaviest scene in the game. The standardised 1,024-frame
+> attract-loop benchmark introduced afterwards averages 3.19 FPS at the same
+> 100 MHz. Both are correct measurements of different workloads — see
+> `docs/PERFORMANCE.md` section 1.1.
+
 **Impact:**
 Playable proof-of-concept, but sub-optimal frame rate for fast-paced gameplay.
 

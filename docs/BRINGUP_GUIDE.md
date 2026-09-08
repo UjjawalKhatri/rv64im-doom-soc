@@ -145,19 +145,42 @@ While DOOM is running, execute the telemetry readback script over XSDB:
 xsdb scripts/jtag/read_fps.tcl
 ```
 
-**Expected Console Output:**
+**Expected Console Output** (exact values depend on the scene on screen):
 ```
 ==================================================================
-  RV64IM Bare-Metal DOOM Performance Telemetry
+  DOOM on RV64IM SoC - live frame-rate
 ==================================================================
-Frame Count:      1,428 frames
-Sustained FPS:    2.59 FPS (259)
-Total Frame Time: 385,971 us (385.97 ms)
-  - Blit Time:    31,200 us (8.08%)
-  - Render Time:  354,771 us (91.92%)
-Target Clock:     100.00 MHz
+  Frame rate       : 2.59 FPS
+  Avg frame time   : 385971 us
+    - blit to FB   :  31200 us  ( 8%)  64000 byte MMIO stores
+    - render+logic : 354771 us  (91%)  R_RenderPlayerView etc.
+  Frames rendered  : 1428
+------------------------------------------------------------------
+  WHOLE-RUN AVERAGE  (use this to compare builds, not the above)
+  Average frame rate : 3.19 FPS  over 1428 frames / 447.8 s
+  Average frame time : 312502 us
+    - blit to FB     :  31169 us  ( 9%)   fixed 64000-byte workload
+    - render+logic   : 281333 us  (90%)   scene dependent
 ==================================================================
 ```
+
+The top block covers only the **last 32 frames**, so it tracks whatever is on
+screen and swings between roughly 2.2 and 6.5 FPS. The `WHOLE-RUN AVERAGE`
+block covers every frame since boot and is the figure to quote.
+
+### Comparing builds
+
+To compare two bitstreams, do not read the counters at an arbitrary moment —
+the scene dominates the result. Use the fixed-protocol script instead:
+
+```bash
+xsdb scripts/jtag/measure_fps.tcl
+```
+
+It blocks until 1,024 frames have rendered and only then reports. Run it the
+same way for every build: program the bitstream, boot DOOM, **leave the
+controls untouched** so the deterministic attract/demo loop supplies an
+identical workload each time.
 
 ### Reading Milestone Stages (`read_stage.tcl`)
 

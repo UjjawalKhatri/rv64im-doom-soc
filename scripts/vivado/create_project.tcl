@@ -2,9 +2,21 @@
 # File: create_project.tcl
 # Description: Automated Vivado flow for RV64IM DOOM SoC on ZedBoard
 # Builds complete Vivado project from source and generates bitstream.
-# Target: Xilinx Zynq-7000 XC7Z020-CLG484-1 @ 100 MHz
+# Target: Xilinx Zynq-7000 XC7Z020-CLG484-1
 # Usage:
 #   vivado -mode batch -source scripts/vivado/create_project.tcl
+#   vivado -mode batch -source scripts/vivado/create_project.tcl -tclargs <name> <dir> <MHz>
+#
+# The third argument selects the fabric clock: 100, 75 or 50 MHz.
+#
+#   100  runs straight off the ZedBoard's Y9 oscillator.
+#    75  and 50 derive the clock from an MMCM (see rtl/soc/clk_gen.v). Both
+#        divide to exactly 25 MHz for VGA, so display timing is unchanged;
+#        60 MHz is not offered because it cannot produce 25 MHz by any integer
+#        divide.
+#
+# CLK_HZ must track the real clock or timer_mmio's microsecond prescaler is
+# wrong, which silently corrupts the on-board frame-rate measurement.
 # ============================================================================
 
 set project_name "rv64im_doom_soc_proj"
@@ -20,11 +32,27 @@ if { $argc > 1 } {
     set build_dir [file normalize [lindex $argv 1]]
 }
 
+# Fabric clock selection -> top-level generics on doom_soc_top.
+set target_mhz 100
+if { $argc > 2 } {
+    set target_mhz [lindex $argv 2]
+}
+switch -- $target_mhz {
+    100     { set soc_generics {USE_MMCM=0 CLK_HZ=100000000 PIXEL_DIV=4} }
+    75      { set soc_generics {USE_MMCM=1 CLK_HZ=75000000  PIXEL_DIV=3 CLKOUT_DIV=12} }
+    50      { set soc_generics {USE_MMCM=1 CLK_HZ=50000000  PIXEL_DIV=2 CLKOUT_DIV=18} }
+    default {
+        puts "ERROR: unsupported clock '$target_mhz'. Choose 100, 75 or 50."
+        exit 1
+    }
+}
+
 file mkdir $build_dir
 set proj_dir "$build_dir/$project_name"
 
 puts "=================================================================="
-puts "  BUILDING RV64IM DOOM SOC FOR ZEDBOARD (XC7Z020 @ 100 MHz)       "
+puts "  BUILDING RV64IM DOOM SOC FOR ZEDBOARD (XC7Z020 @ $target_mhz MHz)"
+puts "  Generics: $soc_generics                                          "
 puts "  Repository Root: $origin_dir                                    "
 puts "  Project Directory: $proj_dir                                    "
 puts "=================================================================="
@@ -70,8 +98,9 @@ catch {
 generate_target all [get_files *ps7_zed.bd]
 make_wrapper -files [get_files *ps7_zed.bd] -top -import
 
-# 6. Set top module
+# 6. Set top module and the clock generics chosen above
 set_property top doom_soc_top [current_fileset]
+set_property generic $soc_generics [get_filesets sources_1]
 set_property top tb_doom_min [get_filesets sim_1]
 update_compile_order -fileset sources_1
 update_compile_order -fileset sim_1
@@ -88,7 +117,7 @@ if {[get_property PROGRESS [get_runs synth_1]] != "100%"} {
 }
 
 # 8. Implementation with timing optimization
-puts "\n---> Step 2: Implementing Design & Closing Timing @ 100 MHz..."
+puts "\n---> Step 2: Implementing Design & Closing Timing @ $target_mhz MHz..."
 set_property STRATEGY Performance_Explore [get_runs impl_1]
 launch_runs impl_1 -to_step write_bitstream -jobs 8
 wait_on_run impl_1
@@ -101,17 +130,22 @@ if {[get_property PROGRESS [get_runs impl_1]] != "100%"} {
 # 9. Timing & Utilization Summary
 open_run impl_1
 set wns [get_property SLACK [get_timing_paths -max_paths 1 -nworst 1 -setup]]
-set tns [get_property SLACK [get_timing_paths -max_paths 1 -nworst 1 -hold]]
+set whs [get_property SLACK [get_timing_paths -max_paths 1 -nworst 1 -hold]]
 
 puts "=================================================================="
 puts "  IMPLEMENTATION & BITSTREAM GENERATION COMPLETE                  "
 puts "  Final WNS (Setup Slack) : $wns ns"
-puts "  Final WHS (Hold Slack)  : $tns ns"
+puts "  Final WHS (Hold Slack)  : $whs ns"
 puts "=================================================================="
 
 # Copy final bitstream
 set bit_file [glob -nocomplain "$proj_dir/${project_name}.runs/impl_1/*.bit"]
 if {[file exists [lindex $bit_file 0]]} {
-    file copy -force [lindex $bit_file 0] "$build_dir/doom_soc_top.bit"
-    puts "  Bitstream copied to: $build_dir/doom_soc_top.bit"
+    if {$target_mhz == 100} {
+        set out_bit "$build_dir/doom_soc_top.bit"
+    } else {
+        set out_bit "$build_dir/doom_soc_top_${target_mhz}mhz.bit"
+    }
+    file copy -force [lindex $bit_file 0] $out_bit
+    puts "  Bitstream copied to: $out_bit"
 }

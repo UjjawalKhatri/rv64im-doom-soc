@@ -82,17 +82,17 @@ Writing a 32-bit or 64-bit value to this location updates the corresponding entr
 
 ### 2.5 Software Performance Telemetry Block (`0x8053_0000`)
 
-Located in physical DDR3, this 40-byte structure is updated at the end of each frame by `doomgeneric_rv64.c` and is read by JTAG scripts (`scripts/jtag/read_fps.tcl`):
+Located in physical DDR3 at `0x0053_0000` (`0x8053_0000` CPU space), this 56-byte structure is updated every 32 frames by `doomgeneric_rv64.c` and is read by JTAG scripts (`scripts/jtag/read_fps.tcl`):
 
 | Offset | Field Name | Type | Description |
 |---|---|---|---|
-| `+0x00` | `magic` | `uint32_t` | Magic identifier: `0x50534644` (`"DFSP"`) |
-| `+0x04` | `frame_count` | `uint32_t` | Total frames rendered since startup |
-| `+0x08` | `fps_x100` | `uint32_t` | Frame rate scaled by 100 (e.g. `259` = 2.59 FPS) |
-| `+0x0C` | `frame_time_us` | `uint32_t` | Total frame duration in microseconds |
-| `+0x10` | `blit_time_us` | `uint32_t` | Framebuffer blit duration in microseconds |
-| `+0x14` | `render_time_us`| `uint32_t` | 3D engine render & tick duration in microseconds |
-| `+0x18` | `reserved[4]` | `uint32_t` | Future expansion (CPI, stall cycles) |
+| `+0x00` | `fps_x100` | `uint64_t` | Frame rate scaled by 100 over the last 32 frames (e.g. `259` = 2.59 FPS) |
+| `+0x08` | `frame_count` | `uint64_t` | Total frames rendered since startup |
+| `+0x10` | `frame_time_us` | `uint64_t` | Average frame duration over the last 32 frames in microseconds |
+| `+0x18` | `blit_time_us` | `uint64_t` | Average framebuffer blit duration over the last 32 frames in microseconds |
+| `+0x20` | `magic` | `uint64_t` | Magic identifier: `0x50455246` (`"PERF"`) |
+| `+0x28` | `elapsed_run_us`| `uint64_t` | Total elapsed microseconds since the first rendered frame |
+| `+0x30` | `blit_run_us` | `uint64_t` | Cumulative blit duration across the entire run in microseconds |
 
 ---
 

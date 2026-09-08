@@ -16,7 +16,28 @@
 `timescale 1ns / 1ps
 
 module doom_soc_top #(
-    parameter MEM_FILE = "instructions.mem"
+    parameter MEM_FILE = "instructions.mem",
+
+    // ------------------------------------------------------------------------
+    // PL fabric clock - single point of truth.
+    //
+    // Changing CLK_HZ requires two matching changes:
+    //   1. PS7 FCLK_CLK0 (scripts/vivado/ps7_preset.tcl -> PCW_FPGA0_PERIPHERAL_FREQMHZ)
+    //   2. PIXEL_DIV below, so CLK_HZ / PIXEL_DIV is ~25 MHz for 640x480@60:
+    //        100 MHz -> 4      75 MHz -> 3      50 MHz -> 2
+    //
+    // CLK_HZ also feeds timer_mmio and uart_mmio. Keeping it here prevents the
+    // failure mode where the fabric clock changes but timer_mmio does not, which
+    // silently corrupts the microsecond counter (and the on-board FPS figure).
+    // ------------------------------------------------------------------------
+    parameter integer CLK_HZ    = 100_000_000,
+    parameter integer PIXEL_DIV = 4,
+    // 0 = run straight off the 100 MHz Y9 oscillator (synthesises to a wire).
+    // 1 = MMCM down to 75.000 MHz. When flipping to 1 also set
+    //     CLK_HZ = 75_000_000 and PIXEL_DIV = 3, or the timer and VGA lie.
+    parameter integer USE_MMCM  = 0,
+    // MMCM output divider off the 900 MHz VCO: 12 -> 75 MHz, 18 -> 50 MHz.
+    parameter integer CLKOUT_DIV = 12
 )(
     input  wire        clk,          // 100 MHz system clock (Y9)
     input  wire        reset,        // Active-high reset (BTNC - P16)
@@ -58,12 +79,26 @@ module doom_soc_top #(
 );
 
     // ========================================================================
+    // System Clock: passthrough at 100 MHz, or MMCM-derived 75 MHz.
+    // Every synchronous element below runs on sys_clk - never on `clk`.
+    // ========================================================================
+    wire sys_clk;
+    wire clk_locked;
+
+    clk_gen #(.USE_MMCM(USE_MMCM), .CLKOUT_DIV(CLKOUT_DIV)) CLKGEN_inst (
+        .clk_in  (clk),
+        .clk_out (sys_clk),
+        .locked  (clk_locked)
+    );
+
+    // ========================================================================
     // System Reset: Hardware PS7 Reset + Physical BTNC Reset with 2-FF Synchronizer
+    // Also held asserted until the MMCM reports lock (always true when USE_MMCM=0).
     // ========================================================================
     wire ps7_rst_n;
     reg  rst_sync_0, rst_sync_1;
-    always @(posedge clk or posedge reset or negedge ps7_rst_n) begin
-        if (reset || !ps7_rst_n) begin
+    always @(posedge sys_clk or posedge reset or negedge ps7_rst_n) begin
+        if (reset || !ps7_rst_n || !clk_locked) begin
             rst_sync_0 <= 1'b1;
             rst_sync_1 <= 1'b1;
         end else begin
@@ -110,7 +145,7 @@ module doom_soc_top #(
     rv64i_core_top #(
         .MEM_FILE(MEM_FILE)
     ) core_inst (
-        .clk(clk),
+        .clk(sys_clk),
         .reset(sys_reset),
         .current_pc(current_pc),
         .current_instr(current_instr),
@@ -180,7 +215,7 @@ module doom_soc_top #(
     // SoC Interconnect
     // ========================================================================
     soc_interconnect INTERCONNECT_inst (
-        .clk(clk),
+        .clk(sys_clk),
         .reset(sys_reset),
         // CPU Data Bus
         .cpu_data_valid(cpu_data_valid),
@@ -248,7 +283,7 @@ module doom_soc_top #(
     wire [63:0] arb_ddr_rsp_rdata;
 
     ddr_request_arbiter DDR_ARBITER_inst (
-        .clk(clk),
+        .clk(sys_clk),
         .reset(sys_reset),
         // I-side (Instruction fetch from Core IFU)
         .i_req_valid(core_instr_req_valid),
@@ -298,7 +333,7 @@ module doom_soc_top #(
     wire        axi_rlast, axi_rvalid, axi_rready;
 
     native_axi_master AXI_MASTER_inst (
-        .clk(clk),
+        .clk(sys_clk),
         .resetn(!sys_reset),
         // Simple CPU/Arbiter interface
         .req_valid(arb_ddr_req_valid),
@@ -389,7 +424,7 @@ module doom_soc_top #(
         .fclk_clk0(),
         .fclk_reset0_n(ps7_rst_n),
         // S_AXI_HP0 Slave (Connected to AXI Master)
-        .hp0_aclk(clk),
+        .hp0_aclk(sys_clk),
         .hp0_araddr(axi_araddr),
         .hp0_arburst(axi_arburst),
         .hp0_arcache(axi_arcache),
@@ -439,10 +474,10 @@ module doom_soc_top #(
     wire uart_rx_internal = 1'b1;
 
     uart_mmio #(
-        .CLK_FREQ(100_000_000),
+        .CLK_FREQ(CLK_HZ),
         .BAUD_RATE(115200)
     ) UART_inst (
-        .clk(clk),
+        .clk(sys_clk),
         .reset(reset),
         .mmio_valid(uart_valid_w),
         .mmio_we(uart_we_w),
@@ -456,9 +491,9 @@ module doom_soc_top #(
 
     // Timer (64-bit cycle + microsecond counters)
     timer_mmio #(
-        .CLK_FREQ(100_000_000)
+        .CLK_FREQ(CLK_HZ)
     ) TIMER_inst (
-        .clk(clk),
+        .clk(sys_clk),
         .reset(reset),
         .mmio_valid(timer_valid),
         .mmio_addr(timer_addr),
@@ -476,7 +511,7 @@ module doom_soc_top #(
 
     // GPIO (switches, buttons, LEDs)
     gpio_mmio GPIO_inst (
-        .clk(clk),
+        .clk(sys_clk),
         .reset(reset),
         .mmio_valid(gpio_valid),
         .mmio_we(gpio_we),
@@ -490,8 +525,10 @@ module doom_soc_top #(
     );
 
     // VGA Timing Generator (640x480 @ 60Hz)
-    vga_timing VGA_TIMING_inst (
-        .clk_100mhz(clk),
+    vga_timing #(
+        .PIXEL_DIV(PIXEL_DIV)
+    ) VGA_TIMING_inst (
+        .clk_100mhz(sys_clk),
         .reset(reset),
         .hsync(vga_hsync),
         .vsync(vga_vsync),
@@ -503,7 +540,7 @@ module doom_soc_top #(
 
     // Framebuffer + Palette (320x200 x 8-bit indexed color)
     framebuffer_mmio FB_inst (
-        .clk(clk),
+        .clk(sys_clk),
         .reset(reset),
         .mmio_valid(fb_valid),
         .mmio_we(fb_we),

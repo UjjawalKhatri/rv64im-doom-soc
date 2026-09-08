@@ -7,7 +7,11 @@
 // ============================================================================
 `timescale 1ns / 1ps
 
-module vga_timing (
+module vga_timing #(
+    // System clock divided by PIXEL_DIV must equal ~25 MHz for 640x480@60.
+    //   100 MHz -> 4      75 MHz -> 3      50 MHz -> 2
+    parameter integer PIXEL_DIV = 4
+)(
     input  wire        clk_100mhz,
     input  wire        reset,
 
@@ -37,15 +41,15 @@ module vga_timing (
     localparam V_TOTAL   = V_ACTIVE + V_FP + V_SYNC + V_BP; // 525
 
     // Pixel clock divider: 100 MHz / 4 = 25 MHz
-    reg [1:0] clk_div;
+    reg [3:0] clk_div;
 
-    assign pixel_tick = (clk_div == 2'b00);
+    assign pixel_tick = (clk_div == 4'd0);
 
     always @(posedge clk_100mhz) begin
         if (reset)
-            clk_div <= 2'b0;
+            clk_div <= 4'd0;
         else
-            clk_div <= clk_div + 2'd1;
+            clk_div <= (clk_div == PIXEL_DIV[3:0] - 4'd1) ? 4'd0 : clk_div + 4'd1;
     end
 
     // Horizontal and Vertical Counters

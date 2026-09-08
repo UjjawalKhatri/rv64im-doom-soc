@@ -8,9 +8,19 @@ This document details the measured performance metrics of bare-metal DOOM runnin
 
 Performance measurements were captured via the hardware 64-bit microsecond timer (`0x10001018`) and telemetry block (`0x80530000`), read live over JTAG using `scripts/jtag/read_fps.tcl`:
 
+> **Two different figures appear below, and both are correct.** The table in
+> this section is a *windowed* reading: the frame rate over the last 32 frames
+> during E1M1 corridor combat, which is the heaviest scene in the game. The
+> multi-frequency table that follows is a *whole-run average* over 1,024 frames
+> of the attract/demo loop, which includes lighter menu and title screens. The
+> windowed figure shows what the hardware does under load; the 1,024-frame
+> average is the only one suitable for comparing builds, because a 32-frame
+> window swings by more than 2x with scene content alone — far more than the
+> difference between two clock frequencies.
+
 | Metric | Measured Value | Percentage of Frame |
 |---|---|---|
-| **Sustained Frame Rate** | **2.59 FPS** | — |
+| **Windowed Frame Rate (32 frames, in-game E1M1)** | **2.59 FPS** | — |
 | **Total Frame Duration** | **385,971 µs** (385.97 ms) | 100.00% |
 | **3D Rendering & Game Logic** | **354,771 µs** (354.77 ms) | **91.92%** |
 | **Framebuffer Blit (`I_FinishUpdate`)** | **31,200 µs** (31.20 ms) | **8.08%** |
@@ -19,7 +29,26 @@ Performance measurements were captured via the hardware 64-bit microsecond timer
 
 ![DOOM Gameplay with Live On-Screen FPS Counter](images/doom_gameplay.jpg)
 
-*Real-time on-screen telemetry showing 3.3 FPS during E1M1 corridor combat with authentic 256-color hardware palette color grading.*
+*Real-time on-screen telemetry with authentic 256-colour hardware palette grading. The overlay shows the last-32-frame window, so it moves between roughly 2.2 and 6.5 FPS as the scene changes; the standardised benchmark figures are in section 1.1.*
+
+### 1.1 Multi-Frequency Benchmark Comparison (Standardized 1,024-Frame Protocol)
+
+To isolate pure clock frequency scaling from scene variance, all three hardware builds were profiled over **1,024 consecutive frames** using the automated, zero-input attract/demo loop protocol (`scripts/jtag/measure_fps.tcl`):
+
+| Operating Target | Fabric Clock | Timing Status (WNS) | 1,024-Frame Average FPS | Average Frame Duration | Blit Duration (Fixed Workload) | Render & Logic Duration |
+|---|---|---|---|---|---|---|
+| **`doom_soc_top.bit`** | **100.00 MHz** | −4.015 ns | **3.19 FPS** | **312,502 µs** | **31,169 µs** (9.97%) | 281,333 µs (90.03%) |
+| **`doom_soc_top_75mhz.bit`** | **75.00 MHz** | **−0.661 ns** | **2.64 FPS** | **378,293 µs** | **36,906 µs** (9.75%) | 341,387 µs (90.25%) |
+| **`doom_soc_top_50mhz.bit`** | **50.00 MHz** | **+0.972 ns (Closed)** | **2.11 FPS** | **473,680 µs** | **47,955 µs** (10.12%) | 425,725 µs (89.88%) |
+
+**Physical Memory Latency Model ($B(f) = C/f + M$):**
+Fitting the fixed 64,000-byte framebuffer blit durations between 100 MHz (31,169 µs) and 50 MHz (47,955 µs) isolates the fixed memory controller penalty:
+- Clock-scaling compute component: $C/100 = 16,786\text{ µs}$ (53.85%)
+- Fixed DDR3 round-trip latency: $M = 14,383\text{ µs}$ (**46.15%**)
+- Predicted 75 MHz blit duration: **36,764 µs**
+- Measured 75 MHz blit duration on silicon: **36,906 µs** (**0.38% prediction error**)
+
+This confirms on physical silicon that **~46% of raw memory-operation time is fixed DDR3 controller round-trip latency**, completely independent of fabric clock frequency.
 
 ---
 

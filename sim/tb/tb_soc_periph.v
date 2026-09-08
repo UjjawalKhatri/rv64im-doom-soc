@@ -288,7 +288,7 @@ module tb_soc_periph;
         repeat(50) @(posedge clk);
         mmio_read(64'h1000_1018, read_val2); // Read TIMER_CYCLES again
         if (read_val2 > read_val1) begin
-            $display("[PASS] TIMER_CYCLES incremented: val1=%0d, val2=%0d, delta=%0d",
+            $display("[PASS] TIMER_CYCLES incremented: val1=%0d, val2=%0d, delta=%0d", 
                      read_val1, read_val2, read_val2 - read_val1);
             pass_count = pass_count + 1;
         end else begin
@@ -313,7 +313,7 @@ module tb_soc_periph;
         $display("\n--- TEST 3: UART MMIO & FIFO Loopback ---");
         // Read UART Status (+0x08 -> 0x1000_4008)
         mmio_read(64'h1000_4008, read_val1);
-        $display("[INFO] Initial UART Status: 0x%02h (TX_EMPTY=%b, RX_EMPTY=%b)",
+        $display("[INFO] Initial UART Status: 0x%02h (TX_EMPTY=%b, RX_EMPTY=%b)", 
                  read_val1[3:0], read_val1[1], read_val1[2]);
 
         // Send byte 'D' (0x44) to UART_DATA (0x1000_4000)
@@ -359,27 +359,111 @@ module tb_soc_periph;
 
         // Write pixel index 16 (0x10 - Dark Green in DOOM palette: RGB=0x2F3F1F -> R=0x2, G=0x3, B=0x1)
         // at pixel (1, 0) -> address 0x2000_0001
-        mmio_write(64'h2000_0001, 64'h10, 8'hFF);
+        // framebuffer_mmio extracts the byte lane selected by mmio_addr[2:0]
+        // (cpu_fb_wdata = mmio_wdata >> (8 * mmio_addr[2:0])), matching what the
+        // core's LSU puts on the bus for an `sb`. This raw bus driver has to do
+        // the same, so the pixel byte is shifted into lane 1 for byte address 1.
+        mmio_write(64'h2000_0001, 64'h10 << 8, 8'hFF);
 
-        // Read back pixel (0, 0)
+        // The framebuffer is WRITE-ONLY from the CPU side and reads back as 0.
+        //
+        // This testbench drives the MMIO bus directly and honours mmio_ready, so
+        // it *could* have read the BRAM back. The core cannot: memory_stall gates
+        // on is_ddr_data, and the framebuffer is not in the DDR range, so a real
+        // load samples the bus a cycle before the BRAM output is valid. The read
+        // port was therefore never usable from software, and no software uses it
+        // (sw/src/vga.c and doomgeneric_rv64.c only ever store to FB_BASE).
+        //
+        // Keeping it wired was expensive: it put the BRAM output register into
+        // the core's load-return mux, the forwarding path and the ALU carry
+        // chain, which was the worst setup path in both the 100 MHz and 75 MHz
+        // builds. It is now tied to zero. VGA scanout uses port B and is
+        // unaffected - TEST 4b below proves written pixels still reach the
+        // screen, which is the property that actually matters here.
         mmio_read(64'h2000_0000, read_val1);
-        if (read_val1[7:0] == 8'h28) begin
-            $display("[PASS] Framebuffer pixel (0,0) readback: index 0x%02h", read_val1[7:0]);
+        if (read_val1 == 64'h0) begin
+            $display("[PASS] Framebuffer is write-only: read returned 0x%016h as designed", read_val1);
             pass_count = pass_count + 1;
         end else begin
-            $display("[FAIL] Framebuffer pixel (0,0) readback: expected 0x28, got 0x%02h", read_val1[7:0]);
+            $display("[FAIL] Framebuffer read should be tied to 0, got 0x%016h", read_val1);
             fail_count = fail_count + 1;
         end
 
-        // Read back pixel (1, 0)
+        // Writes must still complete in one cycle (the interconnect handshake is
+        // unchanged) - a hang here would mean mmio_ready regressed.
+        mmio_write(64'h2000_0002, 64'h7F << 16, 8'hFF);   // lane 2 for byte address 2
         mmio_read(64'h2000_0001, read_val2);
-        if (read_val2[7:0] == 8'h10) begin
-            $display("[PASS] Framebuffer pixel (1,0) readback: index 0x%02h", read_val2[7:0]);
+        if (read_val2 == 64'h0) begin
+            $display("[PASS] Framebuffer writes still handshake cleanly after read-port removal");
             pass_count = pass_count + 1;
         end else begin
-            $display("[FAIL] Framebuffer pixel (1,0) readback: expected 0x10, got 0x%02h", read_val2[7:0]);
+            $display("[FAIL] Framebuffer read should be tied to 0, got 0x%016h", read_val2);
             fail_count = fail_count + 1;
         end
+
+        // --------------------------------------------------------------------
+        // TEST 4b: VGA scanout - do written pixels actually reach the screen?
+        //
+        // This replaces the old CPU-readback test with the real end-to-end
+        // property: CPU write -> BRAM port A -> BRAM port B -> palette -> RGB.
+        //
+        // Scanout maps 640x480 to 320x200 with 2x scaling and a 40-line top
+        // border:  doom_x = vga_pixel_x / 2,  doom_y = (vga_pixel_y - 40) / 2.
+        // So DOOM pixel (0,0) is scanned at (0,40) and (1,0) at (2,40). Rather
+        // than simulate 1.28 ms of real scanout to get there, force the
+        // coordinates directly.
+        //
+        // Expected colours come from the real DOOM PLAYPAL table:
+        //   palette[0x28] = 0x6B0F0F -> r=0x6 g=0x0 b=0x0
+        //   palette[0x10] = 0xFFB7B7 -> r=0xF g=0xB b=0xB
+        // (vga_r/g/b take the top nibble of each 8-bit channel.)
+        // --------------------------------------------------------------------
+        $display("\n--- TEST 4b: VGA Scanout (CPU write -> BRAM -> palette -> RGB) ---");
+
+        force vga_active  = 1'b1;
+        force vga_pixel_x = 10'd0;
+        force vga_pixel_y = 10'd40;
+        repeat (3) @(posedge clk);
+        #1;
+        if (vga_r == 4'h6 && vga_g == 4'h0 && vga_b == 4'h0) begin
+            $display("[PASS] Scanout DOOM(0,0) index 0x28 -> RGB %0h%0h%0h (palette 0x6B0F0F)",
+                     vga_r, vga_g, vga_b);
+            pass_count = pass_count + 1;
+        end else begin
+            $display("[FAIL] Scanout DOOM(0,0): expected r=6 g=0 b=0, got r=%0h g=%0h b=%0h",
+                     vga_r, vga_g, vga_b);
+            fail_count = fail_count + 1;
+        end
+
+        force vga_pixel_x = 10'd2;
+        repeat (3) @(posedge clk);
+        #1;
+        if (vga_r == 4'hF && vga_g == 4'hB && vga_b == 4'hB) begin
+            $display("[PASS] Scanout DOOM(1,0) index 0x10 -> RGB %0h%0h%0h (palette 0xFFB7B7)",
+                     vga_r, vga_g, vga_b);
+            pass_count = pass_count + 1;
+        end else begin
+            $display("[FAIL] Scanout DOOM(1,0): expected r=F g=B b=B, got r=%0h g=%0h b=%0h",
+                     vga_r, vga_g, vga_b);
+            fail_count = fail_count + 1;
+        end
+
+        // Outside the DOOM window the output must blank to black.
+        force vga_active = 1'b0;
+        repeat (2) @(posedge clk);
+        #1;
+        if (vga_r == 4'h0 && vga_g == 4'h0 && vga_b == 4'h0) begin
+            $display("[PASS] Scanout blanks to black outside the active DOOM window");
+            pass_count = pass_count + 1;
+        end else begin
+            $display("[FAIL] Scanout should blank to black, got r=%0h g=%0h b=%0h",
+                     vga_r, vga_g, vga_b);
+            fail_count = fail_count + 1;
+        end
+
+        release vga_active;
+        release vga_pixel_x;
+        release vga_pixel_y;
 
         // --------------------------------------------------------------------
         // TEST 5: Unmapped Address Graceful Handshake
